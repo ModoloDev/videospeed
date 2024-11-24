@@ -1,4 +1,4 @@
-import { showMessage } from "./message-handler.js";
+import { showError, showMessage } from "./message-handler.js";
 import { regStrip, keyCodeAliases, KEY_MODIFIERS, tcDefaults, disabledCustomActions, customDoOptions } from "./constants.js";
 
 function recordKeyPress(e) {
@@ -49,10 +49,6 @@ function inputFocus(e) {
   e.target.value = "";
 }
 
-function inputBlur(e) {
-  e.target.value = keyCodeAliases[e.target.keyCode];
-}
-
 const formatKeyCodeAndModifiers = (keyCode, modifiers) => {
   const keyCodeAlias = keyCodeAliases[keyCode]
   if (!modifiers) return keyCodeAlias
@@ -66,11 +62,6 @@ const formatKeyCodeAndModifiers = (keyCode, modifiers) => {
 
   return text
 
-}
-
-function eventCaller(event, className, func) {
-  if (event.target.classList.contains(className))
-    func(event);
 }
 
 function add_shortcut({action, key, modifiers, value, force}) {
@@ -90,20 +81,39 @@ function add_shortcut({action, key, modifiers, value, force}) {
   if (action !== undefined) {
     customDoSelectElement.value = action;
   }
+
+  customDoSelectElement.addEventListener("change", event => {
+    if (disabledCustomActions.includes(event.target.value)) {
+      event.target.nextElementSibling.nextElementSibling.disabled = true;
+      event.target.nextElementSibling.nextElementSibling.value = 0;
+    } else {
+      event.target.nextElementSibling.nextElementSibling.disabled = false;
+    }
+  })
+
   div.appendChild(customDoSelectElement)
   div.appendChild(document.createTextNode (" "))
+
+
 
   const customKeyElement = document.createElement("input");
   customKeyElement.setAttribute("class", "customKey")
   customKeyElement.setAttribute("type", "text");
   customKeyElement.setAttribute("placeholder", "press a key");
+  customKeyElement.spellcheck = false;
 
   if (key !== undefined) {
     customKeyElement.value = formatKeyCodeAndModifiers(key, modifiers);
     customKeyElement.keyCode = key;
   }
+
+  customKeyElement.addEventListener("focus", inputFocus)
+  customKeyElement.addEventListener("keydown", recordKeyPress)
+
   div.appendChild(customKeyElement)
   div.appendChild(document.createTextNode (" "))
+
+
 
   const customValueElement = document.createElement("input");
   customValueElement.setAttribute("class", "customValue")
@@ -112,8 +122,13 @@ function add_shortcut({action, key, modifiers, value, force}) {
 
   if (value !== undefined) customValueElement.value = value
   if (action !== undefined && disabledCustomActions.includes(action)) customValueElement.disabled = true;
+
+  customValueElement.addEventListener("keypress", inputFilterNumbersOnly)
+
   div.appendChild(customValueElement)
   div.appendChild(document.createTextNode (" "))
+
+
 
   const customForceSelect = document.createElement("select");
   customForceSelect.setAttribute("class", "customForce");
@@ -132,40 +147,15 @@ function add_shortcut({action, key, modifiers, value, force}) {
   div.appendChild(customForceSelect)
   div.appendChild(document.createTextNode (" "))
 
-  const buttonElement = document.createElement("button");
-  buttonElement.setAttribute("class", "removeParent")
-  buttonElement.innerText = "X"
-
-  div.appendChild(buttonElement)
 
 
-  div.addEventListener("keypress", (event) => {
-    eventCaller(event, "customValue", inputFilterNumbersOnly);
-  });
-  div.addEventListener("focus", (event) => {
-    eventCaller(event, "customKey", inputFocus);
-  });
-  div.addEventListener("blur", (event) => {
-    eventCaller(event, "customKey", inputBlur);
-  });
-  div.addEventListener("keydown", (event) => {
-    eventCaller(event, "customKey", recordKeyPress);
-  });
-  div.addEventListener("click", (event) => {
-    eventCaller(event, "removeParent", () => {
-      event.target.parentNode.remove();
-    });
-  });
-  div.addEventListener("change", (event) => {
-    eventCaller(event, "customDo", () => {
-      if (disabledCustomActions.includes(event.target.value)) {
-        event.target.nextElementSibling.nextElementSibling.disabled = true;
-        event.target.nextElementSibling.nextElementSibling.value = 0;
-      } else {
-        event.target.nextElementSibling.nextElementSibling.disabled = false;
-      }
-    });
-  });
+  const removeParentButton = document.createElement("button");
+  removeParentButton.setAttribute("class", "removeParent")
+  removeParentButton.innerText = "X"
+
+  removeParentButton.addEventListener("click", (event) => event.target.parentNode.remove())
+
+  div.appendChild(removeParentButton)
 
   const customElement = document.getElementById("customs");
   customElement.insertBefore(
@@ -201,27 +191,36 @@ function createKeyBindings(item) {
 // Validates settings before saving
 function validate() {
   const blacklist = document.getElementById("blacklist");
+  try {
+    blacklist.value.split("\n").forEach((match) => {
+      match = match.replace(regStrip, "");
 
-  blacklist.value.split("\n").forEach((match) => {
-    match = match.replace(regStrip, "");
-
-    if (match.startsWith("/")) {
-      try {
+      if (match.startsWith("/")) {
         const parts = match.split("/");
 
         if (parts.length < 3)
-          throw "invalid regex";
+          throw `Invalid blacklist regex: "${match}". Unable to save. Try wrapping it in forward slashes.`;
 
-        const flags = parts.pop();
-        const regex = parts.slice(1).join("/");
-
-        const regexp = new RegExp(regex, flags);
-      } catch (err) {
-        showMessage("Error: Invalid blacklist regex: \"" + match + "\". Unable to save. Try wrapping it in forward slashes.")
-        return false;
+        // const flags = parts.pop();
+        // const regex = parts.slice(1).join("/");
+        //
+        // const regexp = new RegExp(regex, flags);
       }
-    }
-  });
+    });
+
+    document.querySelectorAll(".row.customs").forEach(element => {
+      for (let child of element.children) {
+        if (child.classList.contains("customKey")) {
+          if (!child.value) throw `Invalid value: ${ child.value }`
+        }
+      }
+    })
+
+  } catch (err) {
+    showError(`Validation failed: [${err}]`);
+    return false;
+  }
+
   return true;
 }
 
