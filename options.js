@@ -34,6 +34,42 @@ const keyCodeAliases = {
   38: "Up",
   39: "Right",
   40: "Down",
+  48: "0",
+  49: "1",
+  50: "2",
+  51: "3",
+  52: "4",
+  53: "5",
+  54: "6",
+  55: "7",
+  56: "8",
+  57: "9",
+  65: "A",
+  66: "B",
+  67: "C",
+  68: "D",
+  69: "E",
+  70: "F",
+  71: "G",
+  72: "H",
+  73: "I",
+  74: "J",
+  75: "K",
+  76: "L",
+  77: "M",
+  78: "N",
+  79: "O",
+  80: "P",
+  81: "Q",
+  82: "R",
+  83: "S",
+  84: "T",
+  85: "U",
+  86: "V",
+  87: "W",
+  88: "X",
+  89: "Y",
+  90: "Z",
   96: "Num 0",
   97: "Num 1",
   98: "Num 2",
@@ -74,22 +110,41 @@ const keyCodeAliases = {
   222: "'"
 };
 
+const KEY_MODIFIERS = {
+  Ctrl: "Ctrl",
+  Alt: "Alt",
+  Shift: "Shift"
+}
+
 function recordKeyPress(e) {
-  if (
-    (e.keyCode >= 48 && e.keyCode <= 57) || // Numbers 0-9
-    (e.keyCode >= 65 && e.keyCode <= 90) || // Letters A-Z
-    keyCodeAliases[e.keyCode] // Other character keys
-  ) {
-    e.target.value =
-      keyCodeAliases[e.keyCode] || String.fromCharCode(e.keyCode);
-    e.target.keyCode = e.keyCode;
+  const keyCode = e.keyCode
+  const keyCodeAlias = keyCodeAliases[keyCode]
+
+  if (keyCodeAlias) {
+    e.target.keyCode = keyCode;
+
+    const modifiers = []
+    if (e.altKey) modifiers.push(KEY_MODIFIERS.Alt)
+    if (e.ctrlKey) modifiers.push(KEY_MODIFIERS.Ctrl)
+    if (e.shiftKey) modifiers.push(KEY_MODIFIERS.Shift)
+
+    if (modifiers) {
+      const parent = e.target.parentElement
+      for (let child of parent.children) {
+        if (child.classList.contains("customForce"))
+          child.value = true
+      }
+      toggle_show_experimental(false, true)
+    }
+
+    e.target.value = formatKeyCodeAndModifiers(keyCode, modifiers)
 
     e.preventDefault();
     e.stopPropagation();
-  } else if (e.keyCode === 8) {
+  } else if (keyCode === 8) {
     // Clear input when backspace pressed
     e.target.value = "";
-  } else if (e.keyCode === 27) {
+  } else if (keyCode === 27) {
     // When esc clicked, clear input
     e.target.value = "null";
     e.target.keyCode = null;
@@ -97,8 +152,9 @@ function recordKeyPress(e) {
 }
 
 function inputFilterNumbersOnly(e) {
-  const char = String.fromCharCode(e.keyCode);
-  if (!/[\d\.]$/.test(char) || !/^\d+(\.\d*)?$/.test(e.target.value + char)) {
+  const char = e.key
+  const actualInput = e.target.value
+  if (!/[\d\.]$/.test(char) || !/^\d+(\.\d*)?$/.test(actualInput + char)) {
     e.preventDefault();
     e.stopPropagation();
   }
@@ -109,19 +165,32 @@ function inputFocus(e) {
 }
 
 function inputBlur(e) {
-  e.target.value =
-    keyCodeAliases[e.target.keyCode] || String.fromCharCode(e.target.keyCode);
+  e.target.value = keyCodeAliases[e.target.keyCode];
 }
 
-function updateShortcutInputText(inputId, keyCode) {
-  document.getElementById(inputId).value =
-    keyCodeAliases[keyCode] || String.fromCharCode(keyCode);
-  document.getElementById(inputId).keyCode = keyCode;
+const formatKeyCodeAndModifiers = (keyCode, modifiers) => {
+  const keyCodeAlias = keyCodeAliases[keyCode]
+  if (!modifiers) return keyCodeAlias
+
+  let text = ''
+  for (let modifier of modifiers) {
+    text += `${modifier}+`
+  }
+
+  text += keyCodeAlias
+
+  return text
+
 }
 
-function updateCustomShortcutInputText(inputItem, keyCode) {
-  inputItem.value = keyCodeAliases[keyCode] || String.fromCharCode(keyCode);
+function updateCustomShortcutInputText(inputItem, keyCode, modifiers) {
+  inputItem.value = formatKeyCodeAndModifiers(keyCode, modifiers);
   inputItem.keyCode = keyCode;
+}
+
+function eventCaller(event, className, func) {
+  if (event.target.classList.contains(className))
+    func(event);
 }
 
 // List of custom actions for which customValue should be disabled
@@ -151,6 +220,35 @@ function add_shortcut() {
     </select>
     <button class="removeParent">X</button>`;
   const div = document.createElement("div");
+
+  div.addEventListener("keypress", (event) => {
+    eventCaller(event, "customValue", inputFilterNumbersOnly);
+  });
+  div.addEventListener("focus", (event) => {
+    eventCaller(event, "customKey", inputFocus);
+  });
+  div.addEventListener("blur", (event) => {
+    eventCaller(event, "customKey", inputBlur);
+  });
+  div.addEventListener("keydown", (event) => {
+    eventCaller(event, "customKey", recordKeyPress);
+  });
+  div.addEventListener("click", (event) => {
+    eventCaller(event, "removeParent", () => {
+      event.target.parentNode.remove();
+    });
+  });
+  div.addEventListener("change", (event) => {
+    eventCaller(event, "customDo", () => {
+      if (customActionsNoValues.includes(event.target.value)) {
+        event.target.nextElementSibling.nextElementSibling.disabled = true;
+        event.target.nextElementSibling.nextElementSibling.value = 0;
+      } else {
+        event.target.nextElementSibling.nextElementSibling.disabled = false;
+      }
+    });
+  });
+
   div.setAttribute("class", "row customs");
   div.innerHTML = html;
   const customs_element = document.getElementById("customs");
@@ -164,12 +262,22 @@ function createKeyBindings(item) {
   const action = item.querySelector(".customDo").value;
   const key = item.querySelector(".customKey").keyCode;
   const value = Number(item.querySelector(".customValue").value);
-  const force = item.querySelector(".customForce").value;
+  let force = item.querySelector(".customForce").value;
   const predefined = !!item.id; //item.id ? true : false;
+
+  const keyValue = item.querySelector(".customKey").value;
+
+  const keyModifiers = [];
+  for (let modifier of Object.values(KEY_MODIFIERS)) {
+    if (keyValue.includes(modifier)) {
+      keyModifiers.push(modifier)
+    }
+  }
 
   return {
     action: action,
     key: key,
+    modifiers: keyModifiers,
     value: value,
     force: force,
     predefined: predefined
@@ -178,7 +286,6 @@ function createKeyBindings(item) {
 
 // Validates settings before saving
 function validate() {
-  const status = document.getElementById("status");
   const blacklist = document.getElementById("blacklist");
 
   blacklist.value.split("\n").forEach((match) => {
@@ -196,8 +303,7 @@ function validate() {
 
         const regexp = new RegExp(regex, flags);
       } catch (err) {
-        status.textContent =
-          "Error: Invalid blacklist regex: \"" + match + "\". Unable to save. Try wrapping it in foward slashes.";
+        showStatusMessage("Error: Invalid blacklist regex: \"" + match + "\". Unable to save. Try wrapping it in forward slashes.")
         return false;
       }
     }
@@ -211,7 +317,7 @@ const showStatusMessage = (message, time) => {
   status.textContent = message;
   setTimeout(function () {
     status.textContent = "";
-  }, time ? time : 1000);
+  }, time ? time : 3000);
 }
 
 // Saves options to chrome.storage
@@ -259,12 +365,15 @@ function save_options() {
 
   Promise.all([removeKeys, saveOptionsOnChromeStorage])
     .then(successFunction, failureFunction)
+    .then(restore_options)
 
 }
 
 // Restores options from chrome.storage
 function restore_options() {
   chrome.storage.sync.get(tcDefaults, function (storage) {
+    toggle_show_experimental(true)
+
     document
       .querySelectorAll(".removeParent")
       .forEach((button) => button.click()); // Remove added shortcuts
@@ -293,38 +402,40 @@ function restore_options() {
       if (item.predefined) {
         //do predefined ones because their value needed for overlay
         // document.querySelector("#" + item["action"] + " .customDo").value = item["action"];
-        if (item["action"] === "display" && typeof item["key"] === "undefined") {
-          item["key"] = storage.displayKeyCode || tcDefaults.displayKeyCode; // V
+        if (item.action=== "display" && typeof item.key === "undefined") {
+          item.key = storage.displayKeyCode || tcDefaults.displayKeyCode; // V
         }
 
-        if (customActionsNoValues.includes(item["action"]))
+        if (customActionsNoValues.includes(item.action))
           document.querySelector(
-            "#" + item["action"] + " .customValue"
+            "#" + item.action + " .customValue"
           ).disabled = true;
 
         updateCustomShortcutInputText(
-          document.querySelector("#" + item["action"] + " .customKey"),
-          item["key"]
+          document.querySelector("#" + item.action + " .customKey"),
+          item.key,
+          item.modifiers
         );
-        document.querySelector("#" + item["action"] + " .customValue").value =
-          item["value"];
-        document.querySelector("#" + item["action"] + " .customForce").value =
-          item["force"];
+        document.querySelector("#" + item.action + " .customValue").value =
+          item.value;
+        document.querySelector("#" + item.action + " .customForce").value =
+          item.force;
       } else {
         // new ones
         add_shortcut();
         const dom = document.querySelector(".customs:last-of-type");
-        dom.querySelector(".customDo").value = item["action"];
+        dom.querySelector(".customDo").value = item.action;
 
-        if (customActionsNoValues.includes(item["action"]))
+        if (customActionsNoValues.includes(item.action))
           dom.querySelector(".customValue").disabled = true;
 
         updateCustomShortcutInputText(
           dom.querySelector(".customKey"),
-          item["key"]
+          item.key,
+          item.modifiers
         );
-        dom.querySelector(".customValue").value = item["value"];
-        dom.querySelector(".customForce").value = item["force"];
+        dom.querySelector(".customValue").value = item.value;
+        dom.querySelector(".customForce").value = item.force;
       }
     }
   });
@@ -338,10 +449,18 @@ function restore_defaults() {
   });
 }
 
-function show_experimental() {
-  document
-    .querySelectorAll(".customForce")
-    .forEach((item) => (item.style.display = "inline-block"));
+function toggle_show_experimental(forceHide, forceShow) {
+  const elements = document.querySelectorAll(".customForce")
+  if (!elements) return
+
+  const firstElementDisplay = elements[0].style.display
+
+  for (let item of elements) {
+    if (forceShow) item.style.display = "inline-block"
+    else if (forceHide || firstElementDisplay === "inline-block") {
+      item.style.display = "none"
+    } else item.style.display = "inline-block"
+  }
 }
 
 const importOptions = () => {
@@ -360,7 +479,7 @@ const importOptions = () => {
 
         chrome.storage.sync.set(options)
           .then(restore_options)
-          .then(() => showStatusMessage("Options imported", 3000))
+          .then(() => showStatusMessage("Options imported"))
       };
 
       reader.readAsText(file);
@@ -403,43 +522,9 @@ document.addEventListener("DOMContentLoaded", function () {
     .addEventListener("click", restore_defaults);
   document
     .getElementById("experimental")
-    .addEventListener("click", show_experimental);
+    .addEventListener("click", () => toggle_show_experimental());
 
   document.getElementById("import").addEventListener("click", importOptions);
   document.getElementById("export").addEventListener("click", exportOptions);
 
-  function eventCaller(event, className, funcName) {
-    if (!event.target.classList.contains(className)) {
-      return;
-    }
-    funcName(event);
-  }
-
-  document.addEventListener("keypress", (event) => {
-    eventCaller(event, "customValue", inputFilterNumbersOnly);
-  });
-  document.addEventListener("focus", (event) => {
-    eventCaller(event, "customKey", inputFocus);
-  });
-  document.addEventListener("blur", (event) => {
-    eventCaller(event, "customKey", inputBlur);
-  });
-  document.addEventListener("keydown", (event) => {
-    eventCaller(event, "customKey", recordKeyPress);
-  });
-  document.addEventListener("click", (event) => {
-    eventCaller(event, "removeParent", function () {
-      event.target.parentNode.remove();
-    });
-  });
-  document.addEventListener("change", (event) => {
-    eventCaller(event, "customDo", function () {
-      if (customActionsNoValues.includes(event.target.value)) {
-        event.target.nextElementSibling.nextElementSibling.disabled = true;
-        event.target.nextElementSibling.nextElementSibling.value = 0;
-      } else {
-        event.target.nextElementSibling.nextElementSibling.disabled = false;
-      }
-    });
-  });
 });
