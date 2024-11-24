@@ -1,120 +1,5 @@
-const regStrip = /^[\r\t\f\v ]+|[\r\t\f\v ]+$/gm;
-
-const tcDefaults = {
-  speed: 1.0, // default:
-  displayKeyCode: 86, // default: V
-  rememberSpeed: false, // default: false
-  audioBoolean: false, // default: false
-  startHidden: false, // default: false
-  forceLastSavedSpeed: false, //default: false
-  enabled: true, // default enabled
-  controllerOpacity: 0.3, // default: 0.3
-  keyBindings: [
-    { action: "display", key: 86, value: 0, force: false, predefined: true }, // V
-    { action: "slower", key: 83, value: 0.1, force: false, predefined: true }, // S
-    { action: "faster", key: 68, value: 0.1, force: false, predefined: true }, // D
-    { action: "rewind", key: 90, value: 10, force: false, predefined: true }, // Z
-    { action: "advance", key: 88, value: 10, force: false, predefined: true }, // X
-    { action: "reset", key: 82, value: 1, force: false, predefined: true }, // R
-    { action: "fast", key: 71, value: 1.8, force: false, predefined: true } // G
-  ],
-  blacklist: `www.instagram.com
-    twitter.com
-    imgur.com
-    teams.microsoft.com
-  `.replace(regStrip, "")
-};
-
-const keyCodeAliases = {
-  0: "null",
-  null: "null",
-  undefined: "null",
-  32: "Space",
-  37: "Left",
-  38: "Up",
-  39: "Right",
-  40: "Down",
-  48: "0",
-  49: "1",
-  50: "2",
-  51: "3",
-  52: "4",
-  53: "5",
-  54: "6",
-  55: "7",
-  56: "8",
-  57: "9",
-  65: "A",
-  66: "B",
-  67: "C",
-  68: "D",
-  69: "E",
-  70: "F",
-  71: "G",
-  72: "H",
-  73: "I",
-  74: "J",
-  75: "K",
-  76: "L",
-  77: "M",
-  78: "N",
-  79: "O",
-  80: "P",
-  81: "Q",
-  82: "R",
-  83: "S",
-  84: "T",
-  85: "U",
-  86: "V",
-  87: "W",
-  88: "X",
-  89: "Y",
-  90: "Z",
-  96: "Num 0",
-  97: "Num 1",
-  98: "Num 2",
-  99: "Num 3",
-  100: "Num 4",
-  101: "Num 5",
-  102: "Num 6",
-  103: "Num 7",
-  104: "Num 8",
-  105: "Num 9",
-  106: "Num *",
-  107: "Num +",
-  109: "Num -",
-  110: "Num .",
-  111: "Num /",
-  112: "F1",
-  113: "F2",
-  114: "F3",
-  115: "F4",
-  116: "F5",
-  117: "F6",
-  118: "F7",
-  119: "F8",
-  120: "F9",
-  121: "F10",
-  122: "F11",
-  123: "F12",
-  186: ";",
-  188: "<",
-  189: "-",
-  187: "+",
-  190: ">",
-  191: "/",
-  192: "~",
-  219: "[",
-  220: "\\",
-  221: "]",
-  222: "'"
-};
-
-const KEY_MODIFIERS = {
-  Ctrl: "Ctrl",
-  Alt: "Alt",
-  Shift: "Shift"
-}
+import { showMessage } from "./message-handler.js";
+import { regStrip, keyCodeAliases, KEY_MODIFIERS, tcDefaults, disabledCustomActions, customDoOptions } from "./constants.js";
 
 function recordKeyPress(e) {
   const keyCode = e.keyCode
@@ -128,7 +13,7 @@ function recordKeyPress(e) {
     if (e.ctrlKey) modifiers.push(KEY_MODIFIERS.Ctrl)
     if (e.shiftKey) modifiers.push(KEY_MODIFIERS.Shift)
 
-    if (modifiers) {
+    if (modifiers.length > 0) {
       const parent = e.target.parentElement
       for (let child of parent.children) {
         if (child.classList.contains("customForce"))
@@ -183,43 +68,76 @@ const formatKeyCodeAndModifiers = (keyCode, modifiers) => {
 
 }
 
-function updateCustomShortcutInputText(inputItem, keyCode, modifiers) {
-  inputItem.value = formatKeyCodeAndModifiers(keyCode, modifiers);
-  inputItem.keyCode = keyCode;
-}
-
 function eventCaller(event, className, func) {
   if (event.target.classList.contains(className))
     func(event);
 }
 
-// List of custom actions for which customValue should be disabled
-const customActionsNoValues = ["pause", "muted", "mark", "jump", "display"];
-
-function add_shortcut() {
-  const html = `<select class="customDo">
-    <option value="slower">Decrease speed</option>
-    <option value="faster">Increase speed</option>
-    <option value="rewind">Rewind</option>
-    <option value="advance">Advance</option>
-    <option value="reset">Reset speed</option>
-    <option value="fast">Preferred speed</option>
-    <option value="muted">Mute</option>
-    <option value="softer">Decrease volume</option>
-    <option value="louder">Increase volume</option>
-    <option value="pause">Pause</option>
-    <option value="mark">Set marker</option>
-    <option value="jump">Jump to marker</option>
-    <option value="display">Show/hide controller</option>
-    </select>
-    <input class="customKey" type="text" placeholder="press a key"/>
-    <input class="customValue" type="text" placeholder="value (0.10)"/>
-    <select class="customForce">
-    <option value="false">Do not disable website key bindings</option>
-    <option value="true">Disable website key bindings</option>
-    </select>
-    <button class="removeParent">X</button>`;
+function add_shortcut({action, key, modifiers, value, force}) {
   const div = document.createElement("div");
+  div.setAttribute("class", "row customs");
+
+  const customDoSelectElement = document.createElement("select");
+  customDoSelectElement.setAttribute("class", "customDo");
+
+  for (let customDoOption of customDoOptions) {
+    const option = document.createElement("option");
+    option.value = customDoOption.value;
+    option.text = customDoOption.text;
+    customDoSelectElement.add(option)
+  }
+
+  if (action !== undefined) {
+    customDoSelectElement.value = action;
+  }
+  div.appendChild(customDoSelectElement)
+  div.appendChild(document.createTextNode (" "))
+
+  const customKeyElement = document.createElement("input");
+  customKeyElement.setAttribute("class", "customKey")
+  customKeyElement.setAttribute("type", "text");
+  customKeyElement.setAttribute("placeholder", "press a key");
+
+  if (key !== undefined) {
+    customKeyElement.value = formatKeyCodeAndModifiers(key, modifiers);
+    customKeyElement.keyCode = key;
+  }
+  div.appendChild(customKeyElement)
+  div.appendChild(document.createTextNode (" "))
+
+  const customValueElement = document.createElement("input");
+  customValueElement.setAttribute("class", "customValue")
+  customValueElement.setAttribute("type", "text");
+  customValueElement.setAttribute("placeholder", "value (0.10)");
+
+  if (value !== undefined) customValueElement.value = value
+  if (action !== undefined && disabledCustomActions.includes(action)) customValueElement.disabled = true;
+  div.appendChild(customValueElement)
+  div.appendChild(document.createTextNode (" "))
+
+  const customForceSelect = document.createElement("select");
+  customForceSelect.setAttribute("class", "customForce");
+
+  const customForceOption1 = document.createElement("option");
+  customForceOption1.value = "false";
+  customForceOption1.text = "Do not disable website key bindings"
+  customForceSelect.add(customForceOption1)
+
+  const customForceOption2 = document.createElement("option");
+  customForceOption2.value = "true";
+  customForceOption2.text = "Disable website key bindings"
+  customForceSelect.add(customForceOption2)
+
+  if (force !== undefined) customForceSelect.value = force
+  div.appendChild(customForceSelect)
+  div.appendChild(document.createTextNode (" "))
+
+  const buttonElement = document.createElement("button");
+  buttonElement.setAttribute("class", "removeParent")
+  buttonElement.innerText = "X"
+
+  div.appendChild(buttonElement)
+
 
   div.addEventListener("keypress", (event) => {
     eventCaller(event, "customValue", inputFilterNumbersOnly);
@@ -240,7 +158,7 @@ function add_shortcut() {
   });
   div.addEventListener("change", (event) => {
     eventCaller(event, "customDo", () => {
-      if (customActionsNoValues.includes(event.target.value)) {
+      if (disabledCustomActions.includes(event.target.value)) {
         event.target.nextElementSibling.nextElementSibling.disabled = true;
         event.target.nextElementSibling.nextElementSibling.value = 0;
       } else {
@@ -249,12 +167,10 @@ function add_shortcut() {
     });
   });
 
-  div.setAttribute("class", "row customs");
-  div.innerHTML = html;
-  const customs_element = document.getElementById("customs");
-  customs_element.insertBefore(
+  const customElement = document.getElementById("customs");
+  customElement.insertBefore(
     div,
-    customs_element.children[customs_element.childElementCount - 1]
+    document.getElementById("add")
   );
 }
 
@@ -263,7 +179,6 @@ function createKeyBindings(item) {
   const key = item.querySelector(".customKey").keyCode;
   const value = Number(item.querySelector(".customValue").value);
   let force = item.querySelector(".customForce").value;
-  const predefined = !!item.id; //item.id ? true : false;
 
   const keyValue = item.querySelector(".customKey").value;
 
@@ -279,8 +194,7 @@ function createKeyBindings(item) {
     key: key,
     modifiers: keyModifiers,
     value: value,
-    force: force,
-    predefined: predefined
+    force: force
   }
 }
 
@@ -303,21 +217,12 @@ function validate() {
 
         const regexp = new RegExp(regex, flags);
       } catch (err) {
-        showStatusMessage("Error: Invalid blacklist regex: \"" + match + "\". Unable to save. Try wrapping it in forward slashes.")
+        showMessage("Error: Invalid blacklist regex: \"" + match + "\". Unable to save. Try wrapping it in forward slashes.")
         return false;
       }
     }
   });
   return true;
-}
-
-const showStatusMessage = (message, time) => {
-  // Update status to let user know options were saved.
-  const status = document.getElementById("status");
-  status.textContent = message;
-  setTimeout(function () {
-    status.textContent = "";
-  }, time ? time : 3000);
 }
 
 // Saves options to chrome.storage
@@ -357,9 +262,9 @@ function save_options() {
 
   const saveOptionsOnChromeStorage = chrome.storage.sync.set(options);
 
-  const successFunction = () => showStatusMessage("Options saved")
+  const successFunction = () => showMessage("Options saved")
   const failureFunction = (reason) => {
-    showStatusMessage("An error occurred while trying to save")
+    showMessage("An error occurred while trying to save")
     console.log("An error occurred while trying to save,", reason);
   }
 
@@ -372,8 +277,7 @@ function save_options() {
 // Restores options from chrome.storage
 function restore_options() {
   chrome.storage.sync.get(tcDefaults, function (storage) {
-    toggle_show_experimental(true)
-
+    document.querySelectorAll(".row.customs").forEach((item) => item.remove())
     document
       .querySelectorAll(".removeParent")
       .forEach((button) => button.click()); // Remove added shortcuts
@@ -387,57 +291,10 @@ function restore_options() {
       storage.controllerOpacity;
     document.getElementById("blacklist").value = storage.blacklist;
 
-    // ensure that there is a "display" binding for upgrades from versions that had it as a separate binding
-    if (storage.keyBindings.filter((x) => x.action === "display").length === 0) {
-      storage.keyBindings.push({
-        action: "display",
-        value: 0,
-        force: false,
-        predefined: true
-      });
+    for (const item of storage.keyBindings) {
+      add_shortcut(item)
     }
 
-    for (let i in storage.keyBindings) {
-      const item = storage.keyBindings[i];
-      if (item.predefined) {
-        //do predefined ones because their value needed for overlay
-        // document.querySelector("#" + item["action"] + " .customDo").value = item["action"];
-        if (item.action=== "display" && typeof item.key === "undefined") {
-          item.key = storage.displayKeyCode || tcDefaults.displayKeyCode; // V
-        }
-
-        if (customActionsNoValues.includes(item.action))
-          document.querySelector(
-            "#" + item.action + " .customValue"
-          ).disabled = true;
-
-        updateCustomShortcutInputText(
-          document.querySelector("#" + item.action + " .customKey"),
-          item.key,
-          item.modifiers
-        );
-        document.querySelector("#" + item.action + " .customValue").value =
-          item.value;
-        document.querySelector("#" + item.action + " .customForce").value =
-          item.force;
-      } else {
-        // new ones
-        add_shortcut();
-        const dom = document.querySelector(".customs:last-of-type");
-        dom.querySelector(".customDo").value = item.action;
-
-        if (customActionsNoValues.includes(item.action))
-          dom.querySelector(".customValue").disabled = true;
-
-        updateCustomShortcutInputText(
-          dom.querySelector(".customKey"),
-          item.key,
-          item.modifiers
-        );
-        dom.querySelector(".customValue").value = item.value;
-        dom.querySelector(".customForce").value = item.force;
-      }
-    }
   });
 }
 
@@ -445,20 +302,20 @@ function restore_defaults() {
   chrome.storage.sync.set(tcDefaults, function () {
     restore_options();
     // Update status to let user know options were saved.
-    showStatusMessage("Default options restored")
+    showMessage("Default options restored")
   });
 }
 
 function toggle_show_experimental(forceHide, forceShow) {
   const elements = document.querySelectorAll(".customForce")
-  if (!elements) return
+  if (elements.length === 0) return
 
   const firstElementDisplay = elements[0].style.display
 
   for (let item of elements) {
     if (forceShow) item.style.display = "inline-block"
     else if (forceHide || firstElementDisplay === "inline-block") {
-      item.style.display = "none"
+      item.style.display = ""
     } else item.style.display = "inline-block"
   }
 }
@@ -479,7 +336,7 @@ const importOptions = () => {
 
         chrome.storage.sync.set(options)
           .then(restore_options)
-          .then(() => showStatusMessage("Options imported"))
+          .then(() => showMessage("Options imported"))
       };
 
       reader.readAsText(file);
@@ -517,13 +374,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
   document.getElementById("save").addEventListener("click", save_options);
   document.getElementById("add").addEventListener("click", add_shortcut);
-  document
-    .getElementById("restore")
-    .addEventListener("click", restore_defaults);
-  document
-    .getElementById("experimental")
-    .addEventListener("click", () => toggle_show_experimental());
-
+  document.getElementById("restore").addEventListener("click", restore_defaults);
+  document.getElementById("experimental").addEventListener("click", () => toggle_show_experimental());
   document.getElementById("import").addEventListener("click", importOptions);
   document.getElementById("export").addEventListener("click", exportOptions);
 
