@@ -1,3 +1,5 @@
+import { randomId } from "./random.js";
+
 const regStrip = /^[\r\t\f\v ]+|[\r\t\f\v ]+$/gm;
 
 const keyCodeAliases = {
@@ -91,30 +93,29 @@ const KEY_MODIFIERS = {
   Shift: "Shift"
 }
 
+// TODO: Switch keyCode to code (real input) and key
 const tcDefaults = {
-  speed: 1.0, // default:
-  displayKeyCode: 86, // default: V
-  rememberSpeed: false, // default: false
-  audioBoolean: false, // default: false
-  startHidden: false, // default: false
-  forceLastSavedSpeed: false, //default: false
   enabled: true, // default enabled
+  startHidden: false, // default: false
+  rememberSpeed: false, // default: false
+  forceLastSavedSpeed: false, //default: false
+  audioBoolean: false, // default: false
   controllerOpacity: 0.3, // default: 0.3
-  keyBindings: [
-    { action: "display", key: 86, value: 0, force: false }, // V
-    { action: "slower", key: 83, value: 0.1, force: false }, // S
-    { action: "faster", key: 68, value: 0.1, force: false }, // D
-    { action: "rewind", key: 90, value: 10, force: false }, // Z
-    { action: "advance", key: 88, value: 10, force: false }, // X
-    { action: "reset", key: 82, value: 1, force: false }, // R
-    { action: "fast", key: 71, value: 1.8, force: false } // G
-  ],
   blacklist: `www.instagram.com
     twitter.com
     imgur.com
     teams.microsoft.com
-  `.replace(regStrip, "")
-};
+  `.replace(regStrip, ""),
+  keyBindings: [
+    { action: "display", key: 86, value: 0, force: false },
+    { action: "slower", key: 83, value: 0.1, force: false },
+    { action: "faster", key: 68, value: 0.1, force: false },
+    { action: "rewind", key: 90, value: 10, force: false },
+    { action: "advance", key: 88, value: 10, force: false },
+    { action: "reset", key: 82, value: 1, force: false },
+    { action: "fast", key: 71, value: 1.8, force: false }
+  ]
+}
 
 const disabledCustomActions = ["pause", "muted", "mark", "jump", "display"];
 
