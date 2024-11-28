@@ -327,7 +327,7 @@ class Settings {
 
   setKeyBindValue(event) {
     const keyBind = this.getKeyBind(event.target.parentElement)
-    if (keyBind) keyBind.value = event.target.value
+    if (keyBind) keyBind.value = Number(event.target.value)
   }
 
   inputFocus(event) {
@@ -396,6 +396,8 @@ class Settings {
       "advanceKeyCode",
       "fastKeyCode"
     ]);
+
+    console.log(options)
 
     const saveOptionsOnChromeStorage = chrome.storage.sync.set(options);
 
