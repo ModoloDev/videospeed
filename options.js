@@ -1,7 +1,7 @@
 import { showError, showMessage } from "./message-handler.js";
 import { regStrip, keyCodeAliases, KEY_MODIFIERS, tcDefaults, disabledCustomActions, customDoOptions } from "./constants.js";
 
-class Settings {
+class Options {
 
   #ready = false
 
@@ -539,7 +539,7 @@ const jsonToFileAndDownload = (obj, filename) => {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-    new Settings().init().then((settings) => {
+    new Options().init().then((settings) => {
       document.getElementById("save").addEventListener("click", () => settings.save());
       document.getElementById("add").addEventListener("click", () => settings.addKeyBinding());
       document.getElementById("restore").addEventListener("click", () => settings.restoreDefaults());
