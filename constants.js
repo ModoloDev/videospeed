@@ -1,6 +1,5 @@
-import { randomId } from "./random.js";
-
 const regStrip = /^[\r\t\f\v ]+|[\r\t\f\v ]+$/gm;
+const regEndsWithFlags = /\/(?!.*(.).*\1)[gimsuy]*$/;
 
 const keyCodeAliases = {
   0: "null",
@@ -135,4 +134,4 @@ const customDoOptions = [
   { value: "display", text: "Show/hide controller" }
 ]
 
-export { regStrip, keyCodeAliases, KEY_MODIFIERS, tcDefaults, disabledCustomActions, customDoOptions }
+// export { regStrip, keyCodeAliases, KEY_MODIFIERS, tcDefaults, disabledCustomActions, customDoOptions }

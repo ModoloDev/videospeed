@@ -35,7 +35,7 @@
         "https://meet.google.com/*"
       ],
       "css": ["assets/css/inject.css"],
-      "js": ["inject.js"]
+      "js": ["constants.js", "inject.js"]
     }
   ],
   "web_accessible_resources": [{

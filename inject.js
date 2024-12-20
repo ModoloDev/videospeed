@@ -24,16 +24,11 @@ const debug = (message) => console.debug(`DEBUG: ${message}`)
 const trace = (message) => console.trace(`TRACE: ${message}`)
 const fatal = (message) => console.info(`FATAL: ${message}`)
 
-
-var regStrip = /^[\r\t\f\v ]+|[\r\t\f\v ]+$/gm;
-var regEndsWithFlags = /\/(?!.*(.).*\1)[gimsuy]*$/;
-
-var tc = {
+const tc = {
   settings: {
     lastSpeed: 1.0, // default 1x
     enabled: true, // default enabled
     speeds: {}, // empty object to hold speed for each source
-
     displayKeyCode: 86, // default: V
     rememberSpeed: false, // default: false
     forceLastSavedSpeed: false, //default: false
@@ -50,13 +45,223 @@ var tc = {
     `.replace(regStrip, "")
   },
 
-  // Holds a reference to all of the AUDIO/VIDEO DOM elements we've attached to
+  // Holds a reference to all the AUDIO/VIDEO DOM elements we've attached to
   mediaElements: []
 };
 
-chrome.storage.sync.get(tc.settings, function (storage) {
+class VideoController {
+
+  video
+  parent
+  controllerElement
+  handlePlay
+  handleSeek
+  speedIndicator
+
+  constructor(target, parent) {
+    console.log(tcDefaults.keyBindings);
+    if (target.vsc) {
+      return target.vsc;
+    }
+
+    tc.mediaElements.push(target);
+
+    this.video = target;
+    this.parent = target.parentElement || parent || target.parentNode;
+    let storedSpeed = tc.settings.speeds[target.currentSrc];
+    if (!tc.settings.rememberSpeed) {
+      if (!storedSpeed) {
+        debug("Overwriting stored speed to 1.0 due to rememberSpeed being disabled")
+        storedSpeed = 1.0;
+      }
+      setKeyBindings("reset", getKeyBindings("fast")); // resetSpeed = fastSpeed
+    } else {
+      debug("Recalling stored speed due to rememberSpeed being enabled");
+      storedSpeed = tc.settings.lastSpeed;
+    }
+
+    debug("Explicitly setting playbackRate to: " + storedSpeed);
+    target.playbackRate = storedSpeed;
+
+    this.controllerElement = this.initializeControls();
+
+    const mediaEventAction = (event) => {
+      storedSpeed = tc.settings.speeds[event.target.currentSrc];
+      if (!tc.settings.rememberSpeed) {
+        if (!storedSpeed) {
+          debug("Overwriting stored speed to 1.0 (rememberSpeed not enabled)");
+          storedSpeed = 1.0;
+        }
+        // resetSpeed isn't really a reset, it's a toggle
+        debug("Setting reset keybinding to fast");
+        setKeyBindings("reset", getKeyBindings("fast")); // resetSpeed = fastSpeed
+      } else {
+        debug("Storing lastSpeed into tc.settings.speeds (rememberSpeed enabled)");
+        storedSpeed = tc.settings.lastSpeed;
+      }
+      // TODO: Check if explicitly setting the playback rate to 1.0 is
+      // necessary when rememberSpeed is disabled (this may accidentally
+      // override a website's intentional initial speed setting interfering
+      // with the site's default behavior)
+      debug("Explicitly setting playbackRate to: " + storedSpeed);
+      setSpeed(event.target, storedSpeed);
+    };
+
+    target.addEventListener(
+      "play",
+      (this.handlePlay = mediaEventAction.bind(this))
+    );
+
+    target.addEventListener(
+      "seeked",
+      (this.handleSeek = mediaEventAction.bind(this))
+    );
+
+    const targetObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (
+          mutation.type === "attributes" &&
+          (mutation.attributeName === "src" ||
+            mutation.attributeName === "currentSrc")
+        ) {
+          debug("mutation of A/V element");
+          const controller = this.controllerElement;
+          if (!mutation.target.src && !mutation.target.currentSrc) {
+            controller.classList.add("vsc-nosource");
+          } else {
+            controller.classList.remove("vsc-nosource");
+          }
+        }
+      });
+    });
+    targetObserver.observe(target, {
+      attributeFilter: ["src", "currentSrc"]
+    });
+  };
+
+  remove() {
+    this.controllerElement.remove();
+    this.video.removeEventListener("play", this.handlePlay);
+    this.video.removeEventListener("seek", this.handleSeek);
+    delete this.video.vsc;
+    let idx = tc.mediaElements.indexOf(this.video);
+    if (idx !== -1) {
+      tc.mediaElements.splice(idx, 1);
+    }
+  };
+
+  initializeControls() {
+    debug("initializeControls Begin");
+    const document = this.video.ownerDocument;
+    const speed = this.video.playbackRate.toFixed(2);
+    const rect = this.video.getBoundingClientRect();
+    // getBoundingClientRect is relative to the viewport; style coordinates
+    // are relative to offsetParent, so we adjust for that here. offsetParent
+    // can be null if the video has `display: none` or is not yet in the DOM.
+    const offsetRect = this.video.offsetParent?.getBoundingClientRect();
+    const top = Math.max(rect.top - (offsetRect?.top || 0), 0) + "px";
+    const left = Math.max(rect.left - (offsetRect?.left || 0), 0) + "px";
+
+    debug("Speed variable set to: " + speed);
+
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("vsc-controller");
+
+    if (!this.video.currentSrc) {
+      wrapper.classList.add("vsc-nosource");
+    }
+
+    if (tc.settings.startHidden) {
+      wrapper.classList.add("vsc-hidden");
+    }
+
+    const shadow = wrapper.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+        <style>
+          @import "${chrome.runtime.getURL("assets/css/shadow.css")}";
+        </style>
+
+        <div id="controller" style="top:${top}; left:${left}; opacity:${
+      tc.settings.controllerOpacity
+    }">
+          <span data-action="drag" class="draggable">${speed}</span>
+          <span id="controls">
+            <button data-action="rewind" class="rw">«</button>
+            <button data-action="slower">&minus;</button>
+            <button data-action="faster">&plus;</button>
+            <button data-action="advance" class="rw">»</button>
+            <button data-action="display" class="hideButton">&times;</button>
+          </span>
+        </div>
+      `;
+    shadow.querySelector(".draggable").addEventListener(
+      "mousedown",
+      (e) => {
+        runAction(e.target.dataset["action"], false, e);
+        e.stopPropagation();
+      },
+      true
+    );
+
+    shadow.querySelectorAll("button").forEach(function (button) {
+      button.addEventListener("click", (e) => {
+          runAction(e.target.dataset["action"], getKeyBindings(e.target.dataset["action"]), e);
+          e.stopPropagation();
+        },
+        true
+      );
+    });
+
+    shadow.querySelector("#controller")
+      .addEventListener("click", (e) => e.stopPropagation(), false);
+    shadow.querySelector("#controller")
+      .addEventListener("mousedown", (e) => e.stopPropagation(), false);
+
+    this.speedIndicator = shadow.querySelector("span");
+    const fragment = document.createDocumentFragment();
+    fragment.appendChild(wrapper);
+
+    switch (true) {
+      // Only special-case Prime Video, not product-page videos (which use
+      // "vjs-tech"), otherwise the overlay disappears in fullscreen mode
+      case location.hostname === "www.amazon.com" && !this.video.classList.contains("vjs-tech"):
+      case location.hostname === "www.reddit.com":
+      case /hbogo\./.test(location.hostname):
+        // insert before parent to bypass overlay
+        if (!this.parent.parentElement) this.parent.insertBefore(fragment, this.parent.firstChild);
+        else this.parent.parentElement.insertBefore(fragment, this.parent);
+        break;
+      case location.hostname === "www.facebook.com":
+        // this is a monstrosity but new FB design does not have *any*
+        // semantic handles for us to traverse the tree, and deep nesting
+        // that we need to bubble up from to get controller to stack correctly
+        let p = this.parent.parentElement.parentElement.parentElement
+          .parentElement.parentElement.parentElement.parentElement;
+        p.insertBefore(fragment, p.firstChild);
+        break;
+      case location.hostname === "tv.apple.com":
+        // insert before parent to bypass overlay
+        this.parent.parentNode.insertBefore(fragment, this.parent.parentNode.firstChild);
+        break;
+      case location.hostname === "www.youtube.com":
+        // sometimes, the controller gets buried under the video
+        // by inserting it at the parent level, we ensure that it's on top
+        const parent = this.parent.parentElement;
+        parent.insertBefore(fragment, parent.firstChild);
+        break;
+      default:
+        // Note: when triggered via a MutationRecord, it's possible that the
+        // target is not the immediate parent. This appends the controller as
+        // the first element of the target, which may not be the parent.
+        this.parent.insertBefore(fragment, this.parent.firstChild);
+    }
+    return wrapper;
+  };
+}
+
+chrome.storage.sync.get(tc.settings, (storage) => {
   tc.settings.keyBindings = storage.keyBindings; // Array
-  if (storage.keyBindings.length == 0) {
+  if (storage.keyBindings.length === 0) {
     // if first initialization of 0.5.3
     // UPDATE
     tc.settings.keyBindings.push({
@@ -128,7 +333,7 @@ chrome.storage.sync.get(tc.settings, function (storage) {
 
   // ensure that there is a "display" binding (for upgrades from versions that had it as a separate binding)
   if (
-    tc.settings.keyBindings.filter((x) => x.action == "display").length == 0
+    tc.settings.keyBindings.filter((x) => x.action === "display").length === 0
   ) {
     tc.settings.keyBindings.push({
       action: "display",
@@ -156,269 +361,56 @@ function setKeyBindings(action, value) {
   ] = value;
 }
 
-function defineVideoController() {
-  // Data structures
-  // ---------------
-  // videoController (JS object) instances:
-  //   video = AUDIO/VIDEO DOM element
-  //   parent = A/V DOM element's parentElement OR
-  //            (A/V elements discovered from the Mutation Observer)
-  //            A/V element's parentNode OR the node whose children changed.
-  //   div = Controller's DOM element (which happens to be a DIV)
-  //   speedIndicator = DOM element in the Controller of the speed indicator
-
-  // added to AUDIO / VIDEO DOM elements
-  //    vsc = reference to the videoController
-  tc.videoController = function (target, parent) {
-    if (target.vsc) {
-      return target.vsc;
-    }
-
-    tc.mediaElements.push(target);
-
-    this.video = target;
-    this.parent = target.parentElement || parent;
-    storedSpeed = tc.settings.speeds[target.currentSrc];
-    if (!tc.settings.rememberSpeed) {
-      if (!storedSpeed) {
-        debug("Overwriting stored speed to 1.0 due to rememberSpeed being disabled")
-        storedSpeed = 1.0;
-      }
-      setKeyBindings("reset", getKeyBindings("fast")); // resetSpeed = fastSpeed
-    } else {
-      debug("Recalling stored speed due to rememberSpeed being enabled");
-      storedSpeed = tc.settings.lastSpeed;
-    }
-
-    debug("Explicitly setting playbackRate to: " + storedSpeed);
-    target.playbackRate = storedSpeed;
-
-    this.div = this.initializeControls();
-
-    var mediaEventAction = function (event) {
-      storedSpeed = tc.settings.speeds[event.target.currentSrc];
-      if (!tc.settings.rememberSpeed) {
-        if (!storedSpeed) {
-          debug("Overwriting stored speed to 1.0 (rememberSpeed not enabled)");
-          storedSpeed = 1.0;
-        }
-        // resetSpeed isn't really a reset, it's a toggle
-        debug("Setting reset keybinding to fast");
-        setKeyBindings("reset", getKeyBindings("fast")); // resetSpeed = fastSpeed
-      } else {
-        debug("Storing lastSpeed into tc.settings.speeds (rememberSpeed enabled)");
-        storedSpeed = tc.settings.lastSpeed;
-      }
-      // TODO: Check if explicitly setting the playback rate to 1.0 is
-      // necessary when rememberSpeed is disabled (this may accidentally
-      // override a website's intentional initial speed setting interfering
-      // with the site's default behavior)
-      debug("Explicitly setting playbackRate to: " + storedSpeed);
-      setSpeed(event.target, storedSpeed);
-    };
-
-    target.addEventListener(
-      "play",
-      (this.handlePlay = mediaEventAction.bind(this))
-    );
-
-    target.addEventListener(
-      "seeked",
-      (this.handleSeek = mediaEventAction.bind(this))
-    );
-
-    var targetObserver = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (
-          mutation.type === "attributes" &&
-          (mutation.attributeName === "src" ||
-            mutation.attributeName === "currentSrc")
-        ) {
-          debug("mutation of A/V element");
-          var controller = this.div;
-          if (!mutation.target.src && !mutation.target.currentSrc) {
-            controller.classList.add("vsc-nosource");
-          } else {
-            controller.classList.remove("vsc-nosource");
-          }
-        }
-      });
-    });
-    targetObserver.observe(target, {
-      attributeFilter: ["src", "currentSrc"]
-    });
-  };
-
-  tc.videoController.prototype.remove = function () {
-    this.div.remove();
-    this.video.removeEventListener("play", this.handlePlay);
-    this.video.removeEventListener("seek", this.handleSeek);
-    delete this.video.vsc;
-    let idx = tc.mediaElements.indexOf(this.video);
-    if (idx != -1) {
-      tc.mediaElements.splice(idx, 1);
-    }
-  };
-
-  tc.videoController.prototype.initializeControls = function () {
-    debug("initializeControls Begin");
-    const document = this.video.ownerDocument;
-    const speed = this.video.playbackRate.toFixed(2);
-    const rect = this.video.getBoundingClientRect();
-    // getBoundingClientRect is relative to the viewport; style coordinates
-    // are relative to offsetParent, so we adjust for that here. offsetParent
-    // can be null if the video has `display: none` or is not yet in the DOM.
-    const offsetRect = this.video.offsetParent?.getBoundingClientRect();
-    const top = Math.max(rect.top - (offsetRect?.top || 0), 0) + "px";
-    const left = Math.max(rect.left - (offsetRect?.left || 0), 0) + "px";
-
-    debug("Speed variable set to: " + speed);
-
-    var wrapper = document.createElement("div");
-    wrapper.classList.add("vsc-controller");
-
-    if (!this.video.currentSrc) {
-      wrapper.classList.add("vsc-nosource");
-    }
-
-    if (tc.settings.startHidden) {
-      wrapper.classList.add("vsc-hidden");
-    }
-
-    var shadow = wrapper.attachShadow({ mode: "open" });
-    var shadowTemplate = `
-        <style>
-          @import "${chrome.runtime.getURL("assets/css/shadow.css")}";
-        </style>
-
-        <div id="controller" style="top:${top}; left:${left}; opacity:${
-      tc.settings.controllerOpacity
-    }">
-          <span data-action="drag" class="draggable">${speed}</span>
-          <span id="controls">
-            <button data-action="rewind" class="rw">«</button>
-            <button data-action="slower">&minus;</button>
-            <button data-action="faster">&plus;</button>
-            <button data-action="advance" class="rw">»</button>
-            <button data-action="display" class="hideButton">&times;</button>
-          </span>
-        </div>
-      `;
-    shadow.innerHTML = shadowTemplate;
-    shadow.querySelector(".draggable").addEventListener(
-      "mousedown",
-      (e) => {
-        runAction(e.target.dataset["action"], false, e);
-        e.stopPropagation();
-      },
-      true
-    );
-
-    shadow.querySelectorAll("button").forEach(function (button) {
-      button.addEventListener(
-        "click",
-        (e) => {
-          runAction(
-            e.target.dataset["action"],
-            getKeyBindings(e.target.dataset["action"]),
-            e
-          );
-          e.stopPropagation();
-        },
-        true
-      );
-    });
-
-    shadow
-      .querySelector("#controller")
-      .addEventListener("click", (e) => e.stopPropagation(), false);
-    shadow
-      .querySelector("#controller")
-      .addEventListener("mousedown", (e) => e.stopPropagation(), false);
-
-    this.speedIndicator = shadow.querySelector("span");
-    var fragment = document.createDocumentFragment();
-    fragment.appendChild(wrapper);
-
-    switch (true) {
-      // Only special-case Prime Video, not product-page videos (which use
-      // "vjs-tech"), otherwise the overlay disappears in fullscreen mode
-      case location.hostname == "www.amazon.com" && !this.video.classList.contains("vjs-tech"):
-      case location.hostname == "www.reddit.com":
-      case /hbogo\./.test(location.hostname):
-        // insert before parent to bypass overlay
-        this.parent.parentElement.insertBefore(fragment, this.parent);
-        break;
-      case location.hostname == "www.facebook.com":
-        // this is a monstrosity but new FB design does not have *any*
-        // semantic handles for us to traverse the tree, and deep nesting
-        // that we need to bubble up from to get controller to stack correctly
-        let p = this.parent.parentElement.parentElement.parentElement
-          .parentElement.parentElement.parentElement.parentElement;
-        p.insertBefore(fragment, p.firstChild);
-        break;
-      case location.hostname == "tv.apple.com":
-        // insert before parent to bypass overlay
-        this.parent.parentNode.insertBefore(fragment, this.parent.parentNode.firstChild);
-        break;
-      default:
-        // Note: when triggered via a MutationRecord, it's possible that the
-        // target is not the immediate parent. This appends the controller as
-        // the first element of the target, which may not be the parent.
-        this.parent.insertBefore(fragment, this.parent.firstChild);
-    }
-    return wrapper;
-  };
-}
-
 function escapeStringRegExp(str) {
-  matchOperatorsRe = /[|\\{}()[\]^$+*?.]/g;
-  return str.replace(matchOperatorsRe, "\\$&");
+  return str.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&");
 }
 
 function isBlacklisted() {
-  blacklisted = false;
+  let blacklisted = false;
   tc.settings.blacklist.split("\n").forEach((match) => {
     match = match.replace(regStrip, "");
-    if (match.length == 0) {
+    if (match.length === 0) {
       return;
     }
 
+    let regexp;
     if (match.startsWith("/")) {
       try {
-        var parts = match.split("/");
+        const parts = match.split("/");
 
+        let flags;
+        let regex;
         if (regEndsWithFlags.test(match)) {
-          var flags = parts.pop();
-          var regex = parts.slice(1).join("/");
+          flags = parts.pop();
+          regex = parts.slice(1).join("/");
         } else {
-          var flags = "";
-          var regex = match;
+          flags = "";
+          regex = match;
         }
 
-        var regexp = new RegExp(regex, flags);
+        regexp = new RegExp(regex, flags);
       } catch (err) {
         return;
       }
     } else {
-      var regexp = new RegExp(escapeStringRegExp(match));
+      regexp = new RegExp(escapeStringRegExp(match));
     }
 
     if (regexp.test(location.href)) {
       blacklisted = true;
-      return;
     }
   });
   return blacklisted;
 }
 
-var coolDown = false;
+let coolDown = false;
+
 function refreshCoolDown() {
   debug("Begin refreshCoolDown");
   if (coolDown) {
     clearTimeout(coolDown);
   }
-  coolDown = setTimeout(function () {
+  coolDown = setTimeout(() => {
     coolDown = false;
   }, 1000);
   debug("End refreshCoolDown");
@@ -437,9 +429,9 @@ function setupListener() {
     // a video controller attached to it.  If we do, ignore it.
     if (!video.vsc)
       return;
-    var speedIndicator = video.vsc.speedIndicator;
-    var src = video.currentSrc;
-    var speed = Number(video.playbackRate.toFixed(2));
+    const speedIndicator = video.vsc.speedIndicator;
+    const src = video.currentSrc;
+    const speed = Number(video.playbackRate.toFixed(2));
 
     info("Playback rate changed to " + speed);
 
@@ -449,7 +441,7 @@ function setupListener() {
     debug("Storing lastSpeed in settings for the rememberSpeed feature");
     tc.settings.lastSpeed = speed;
     debug("Syncing chrome settings for lastSpeed");
-    chrome.storage.sync.set({ lastSpeed: speed }, function () {
+    chrome.storage.sync.set({ lastSpeed: speed }, () => {
       debug("Speed setting saved: " + speed);
     });
     // show the controller for 1000ms if it's hidden.
@@ -458,7 +450,7 @@ function setupListener() {
 
   document.addEventListener(
     "ratechange",
-    function (event) {
+    function(event) {
       if (coolDown) {
         info("Speed event propagation blocked");
         event.stopImmediatePropagation();
@@ -469,7 +461,7 @@ function setupListener() {
        * DOM. For 'open' shadow DOMs, event.composedPath()[0] is the actual element that will
        * first receive the event, and it's equivalent to event.target in non-shadow-DOM cases.
        */
-      var video = event.composedPath()[0];
+      let video = event.composedPath()[0];
 
       /**
        * If the last speed is forced, only update the speed based on events created by
@@ -523,7 +515,7 @@ function getShadow(parent) {
   let result = [];
   function getChild(parent) {
     if (parent.firstElementChild) {
-      var child = parent.firstElementChild;
+      let child = parent.firstElementChild;
       do {
         result.push(child);
         getChild(child);
@@ -555,25 +547,23 @@ function initializeNow(document) {
 
   injectScriptForSite();
 
-  if (document === window.document) {
-    defineVideoController();
-  } else {
-    var link = document.createElement("link");
+  if (document !== window.document) {
+    const link = document.createElement("link");
     link.href = chrome.runtime.getURL("assets/css/inject.css");
     link.type = "text/css";
     link.rel = "stylesheet";
     document.head.appendChild(link);
   }
-  var docs = Array(document);
+  const docs = Array(document);
   try {
     if (inIframe()) docs.push(window.top.document);
   } catch (e) {}
 
-  docs.forEach(function (doc) {
+  docs.forEach((doc) => {
     doc.addEventListener(
       "keydown",
-      function (event) {
-        var keyCode = event.keyCode;
+      (event) => {
+        const keyCode = event.keyCode;
         debug("Processing keydown event: " + keyCode);
 
         // Ignore if following modifier is active.
@@ -604,7 +594,7 @@ function initializeNow(document) {
           return false;
         }
 
-        var item = tc.settings.keyBindings.find((item) => item.key === keyCode);
+        const item = tc.settings.keyBindings.find((item) => item.key === keyCode);
         if (item) {
           runAction(item.action, item.value);
           if (item.force === "true") {
@@ -633,35 +623,35 @@ function initializeNow(document) {
       (node.nodeName === "AUDIO" && tc.settings.audioBoolean)
     ) {
       if (added) {
-        node.vsc = new tc.videoController(node, parent);
+        node.vsc = new VideoController(node, parent);
       } else {
         if (node.vsc) {
           node.vsc.remove();
         }
       }
     } else {
-      var children = [];
+      let children = [];
       if (node.shadowRoot) {
         documentAndShadowRootObserver.observe(node.shadowRoot, documentAndShadowRootObserverOptions);
         children = Array.from(node.shadowRoot.children);
       }
       if (node.children) {
         children = [...children, ...node.children];
-      };
+      }
       for (const child of children) {
         checkForVideoAndShadowRoot(child, child.parentNode || parent, added)
-      };
+      }
     }
   }
 
-  var documentAndShadowRootObserver = new MutationObserver(function (mutations) {
+  const documentAndShadowRootObserver = new MutationObserver((mutations) => {
     // Process the DOM nodes lazily
     requestIdleCallback(
       (_) => {
-        mutations.forEach(function (mutation) {
+        mutations.forEach((mutation) => {
           switch (mutation.type) {
             case "childList":
-              mutation.addedNodes.forEach(function (node) {
+              mutation.addedNodes.forEach((node) => {
                 if (typeof node === "function") return;
                 if (node === document.documentElement) {
                   // This happens on sites that use document.write, e.g. watch.sling.com
@@ -672,7 +662,7 @@ function initializeNow(document) {
                 }
                 checkForVideoAndShadowRoot(node, node.parentNode || mutation.target, true);
               });
-              mutation.removedNodes.forEach(function (node) {
+              mutation.removedNodes.forEach((node) => {
                 if (typeof node === "function") return;
                 checkForVideoAndShadowRoot(node, node.parentNode || mutation.target, false);
               });
@@ -680,12 +670,12 @@ function initializeNow(document) {
             case "attributes":
               if (
                 (mutation.target.attributes["aria-hidden"] &&
-                mutation.target.attributes["aria-hidden"].value == "false")
+                mutation.target.attributes["aria-hidden"].value === "false")
                 || mutation.target.nodeName === 'APPLE-TV-PLUS-PLAYER'
               ) {
-                var flattenedNodes = getShadow(document.body);
-                var nodes = flattenedNodes.filter(
-                  (x) => x.tagName == "VIDEO"
+                const flattenedNodes = getShadow(document.body);
+                const nodes = flattenedNodes.filter(
+                  (x) => x.tagName === "VIDEO"
                 );
                 for (let node of nodes) {
                   // only add vsc the first time for the apple-tv case (the attribute change is triggered every time you click the vsc)
@@ -703,57 +693,56 @@ function initializeNow(document) {
       { timeout: 1000 }
     );
   });
-  documentAndShadowRootObserverOptions = {
+  const documentAndShadowRootObserverOptions = {
     attributeFilter: ["aria-hidden", "data-focus-method"],
     childList: true,
     subtree: true
-  }
+  };
   documentAndShadowRootObserver.observe(document, documentAndShadowRootObserverOptions);
 
   const mediaTagSelector = tc.settings.audioBoolean ? "video,audio" : "video";
-  mediaTags = Array.from(document.querySelectorAll(mediaTagSelector));
+  const mediaTags = Array.from(document.querySelectorAll(mediaTagSelector));
 
   document.querySelectorAll("*").forEach((element) => {
     if (element.shadowRoot) {
       documentAndShadowRootObserver.observe(element.shadowRoot, documentAndShadowRootObserverOptions);
       mediaTags.push(...element.shadowRoot.querySelectorAll(mediaTagSelector));
-    };
+    }
   });
 
-  mediaTags.forEach(function (video) {
-    video.vsc = new tc.videoController(video);
+  mediaTags.forEach((video) => {
+    video.vsc = new VideoController(video);
   });
 
-  var frameTags = document.getElementsByTagName("iframe");
-  Array.prototype.forEach.call(frameTags, function (frame) {
+  const frameTags = document.getElementsByTagName("iframe");
+  Array.prototype.forEach.call(frameTags, (frame) => {
     // Ignore frames we don't have permission to access (different origin).
     try {
-      var childDocument = frame.contentDocument;
+      initializeWhenReady(frame.contentDocument);
     } catch (e) {
-      return;
+      error("Error initializing contentDocument", e)
     }
-    initializeWhenReady(childDocument);
   });
   debug("End initializeNow");
 }
 
 function setSpeed(video, speed) {
   debug("setSpeed started: " + speed);
-  var speedvalue = speed.toFixed(2);
+  const speedValue = speed.toFixed(2);
   if (tc.settings.forceLastSavedSpeed) {
     video.dispatchEvent(
       new CustomEvent("ratechange", {
         // bubbles and composed are needed to allow event to 'escape' open shadow DOMs
         bubbles: true,
         composed: true,
-        detail: { origin: "videoSpeed", speed: speedvalue }
+        detail: { origin: "videoSpeed", speed: speedValue }
       })
     );
   } else {
-    video.playbackRate = Number(speedvalue);
+    video.playbackRate = Number(speedValue);
   }
-  var speedIndicator = video.vsc.speedIndicator;
-  speedIndicator.textContent = speedvalue;
+  const speedIndicator = video.vsc.speedIndicator;
+  speedIndicator.textContent = speedValue;
   tc.settings.lastSpeed = speed;
   refreshCoolDown();
   debug("setSpeed finished: " + speed);
@@ -762,48 +751,50 @@ function setSpeed(video, speed) {
 function runAction(action, value, e) {
   debug("runAction Begin");
 
-  var mediaTags = tc.mediaElements;
+  const mediaTags = tc.mediaElements;
 
   // Get the controller that was used if called from a button press event e
+  let targetController
   if (e) {
-    var targetController = e.target.getRootNode().host;
+    targetController = e.target.getRootNode().host;
   }
 
-  mediaTags.forEach(function (v) {
-    var controller = v.vsc.div;
+  mediaTags.forEach((video) => {
+    const controller = video.vsc.controllerElement;
 
     // Don't change video speed if the video has a different controller
-    if (e && !(targetController == controller)) {
+    if (e && !(targetController === controller)) {
       return;
     }
 
     showController(controller);
 
-    if (!v.classList.contains("vsc-cancelled")) {
+    let speed
+    if (!video.classList.contains("vsc-cancelled")) {
       if (action === "rewind") {
         debug("Rewind");
-        seek(v, -value);
+        seek(video, -value);
       } else if (action === "advance") {
         debug("Fast forward");
-        seek(v, value);
+        seek(video, value);
       } else if (action === "faster") {
         debug("Increase speed");
         // Maximum playback speed in Chrome is set to 16:
         // https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/html/media/html_media_element.h;l=117;drc=70155ab40e50115ac8cff6e8f4b7703a7784d854
-        var s = Math.min(
-          (v.playbackRate < 0.1 ? 0.0 : v.playbackRate) + value,
+        speed = Math.min(
+          (video.playbackRate < 0.1 ? 0.0 : video.playbackRate) + value,
           16
         );
-        setSpeed(v, s);
+        setSpeed(video, speed);
       } else if (action === "slower") {
         debug("Decrease speed");
         // Video min rate is 0.0625:
         // https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/html/media/html_media_element.h;l=116;drc=70155ab40e50115ac8cff6e8f4b7703a7784d854
-        var s = Math.max(v.playbackRate - value, 0.07);
-        setSpeed(v, s);
+        speed = Math.max(video.playbackRate - value, 0.07);
+        setSpeed(video, speed);
       } else if (action === "reset") {
         debug("Reset speed");
-        resetSpeed(v, 1.0);
+        resetSpeed(video, 1.0);
       } else if (action === "display") {
         debug("Showing controller");
         controller.classList.add("vsc-manual");
@@ -826,21 +817,21 @@ function runAction(action, value, e) {
           );
         }
       } else if (action === "drag") {
-        handleDrag(v, e);
+        handleDrag(video, e);
       } else if (action === "fast") {
-        resetSpeed(v, value);
+        resetSpeed(video, value);
       } else if (action === "pause") {
-        pause(v);
+        pause(video);
       } else if (action === "muted") {
-        muted(v);
+        muted(video);
       } else if (action === "louder") {
-        volumeUp(v, value);
+        volumeUp(video, value);
       } else if (action === "softer") {
-        volumeDown(v, value);
+        volumeDown(video, value);
       } else if (action === "mark") {
-        setMark(v);
+        setMark(video);
       } else if (action === "jump") {
-        jumpToMark(v);
+        jumpToMark(video);
       }
     }
   });
@@ -848,20 +839,20 @@ function runAction(action, value, e) {
 }
 
 function injectScriptForSite() {
-  const elt = document.createElement("script");
+  const script = document.createElement("script");
   switch (true) {
-    case location.hostname == "www.netflix.com":
-      elt.src= chrome.runtime.getURL('scriptforsite/netflix.js');
+    case location.hostname === "www.netflix.com":
+      script.src = chrome.runtime.getURL('scriptforsite/netflix.js');
       break;
   }
-  if (elt.src) {
-    document.head.appendChild(elt);
+  if (script.src) {
+    document.head.appendChild(script);
   }
 }
 
 function seek(mediaTag, seekSeconds) {
   switch (true) {
-    case location.hostname == "www.netflix.com":
+    case location.hostname === "www.netflix.com":
       window.postMessage({action: "videospeed-seek", seekMs: seekSeconds * 1000}, "https://www.netflix.com");
       break;
     default:
@@ -917,19 +908,19 @@ function setMark(v) {
   v.vsc.mark = v.currentTime;
 }
 
-function jumpToMark(v) {
+function jumpToMark(video) {
   debug("Recalling marker");
-  if (v.vsc.mark && typeof v.vsc.mark === "number") {
-    v.currentTime = v.vsc.mark;
+  if (video.vsc.mark && typeof video.vsc.mark === "number") {
+    video.currentTime = video.vsc.mark;
   }
 }
 
 function handleDrag(video, e) {
-  const controller = video.vsc.div;
+  const controller = video.vsc.controllerElement;
   const shadowController = controller.shadowRoot.querySelector("#controller");
 
   // Find nearest parent of same size as video parent.
-  var parentElement = controller.parentElement;
+  let parentElement = controller.parentElement;
   while (
     parentElement.parentNode &&
     parentElement.parentNode.offsetHeight === parentElement.offsetHeight &&
@@ -969,14 +960,14 @@ function handleDrag(video, e) {
   parentElement.addEventListener("mousemove", startDragging);
 }
 
-var timer = null;
+let timer = null;
 function showController(controller) {
   info("Showing controller");
   controller.classList.add("vcs-show");
 
   if (timer) clearTimeout(timer);
 
-  timer = setTimeout(function () {
+  timer = setTimeout(() => {
     controller.classList.remove("vcs-show");
     timer = false;
     debug("Hiding controller");

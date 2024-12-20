@@ -1,5 +1,4 @@
 import { showError, showMessage } from "./message-handler.js";
-import { regStrip, keyCodeAliases, KEY_MODIFIERS, tcDefaults, disabledCustomActions, customDoOptions } from "./constants.js";
 
 class Options {
 
