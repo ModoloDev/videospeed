@@ -28,7 +28,7 @@ class Options {
   }
 
   #init(options) {
-    if (!options) options = tcDefaults;
+    if (!options || Object.keys(options).length === 0) options = tcDefaults;
 
     this.enabled = options.enabled
     this.startHidden = options.startHidden
@@ -135,6 +135,8 @@ class Options {
       this.#keyBindings.keys().forEach((element) => element.remove())
     }
     this.#keyBindings = new Map()
+
+    if (!keyBindings || keyBindings.size === 0) return
 
     keyBindings.forEach(keyBinding => {
       try {
