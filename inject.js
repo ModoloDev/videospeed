@@ -150,17 +150,11 @@ class VideoController {
     }
   };
 
+  // TODO: Save dragging position for specific websites and size
   initializeControls() {
     debug("initializeControls Begin");
     const document = this.video.ownerDocument;
     const speed = this.video.playbackRate.toFixed(2);
-    const rect = this.video.getBoundingClientRect();
-    // getBoundingClientRect is relative to the viewport; style coordinates
-    // are relative to offsetParent, so we adjust for that here. offsetParent
-    // can be null if the video has `display: none` or is not yet in the DOM.
-    const offsetRect = this.video.offsetParent?.getBoundingClientRect();
-    const top = Math.max(rect.top - (offsetRect?.top || 0), 0) + "px";
-    const left = Math.max(rect.left - (offsetRect?.left || 0), 0) + "px";
 
     debug("Speed variable set to: " + speed);
 
@@ -181,7 +175,7 @@ class VideoController {
           @import "${chrome.runtime.getURL("assets/css/shadow.css")}";
         </style>
 
-        <div id="controller" style="top:${top}; left:${left}; opacity:${
+        <div id="controller" style="top:${0}; left:${0}; opacity:${
       tc.settings.controllerOpacity
     }">
           <span data-action="drag" class="draggable">${speed}</span>
@@ -212,10 +206,21 @@ class VideoController {
       );
     });
 
-    shadow.querySelector("#controller")
-      .addEventListener("click", (e) => e.stopPropagation(), false);
-    shadow.querySelector("#controller")
-      .addEventListener("mousedown", (e) => e.stopPropagation(), false);
+    const controller = shadow.querySelector("#controller")
+    controller.addEventListener("click", (e) => e.stopPropagation(), false);
+    controller.addEventListener("mousedown", (e) => e.stopPropagation(), false);
+
+    const resizeObserver = new ResizeObserver(() => {
+      const rect = this.video.getBoundingClientRect();
+      // getBoundingClientRect is relative to the viewport; style coordinates
+      // are relative to offsetParent, so we adjust for that here. offsetParent
+      // can be null if the video has `display: none` or is not yet in the DOM.
+      const offsetRect = this.video.offsetParent?.getBoundingClientRect();
+      controller.style.top = Math.max(rect.top - (offsetRect?.top || 0), 0) + "px"
+      controller.style.left = Math.max(rect.left - (offsetRect?.left || 0), 0) + "px"
+    })
+    resizeObserver.observe(this.video)
+    resizeObserver.observe(document.body)
 
     this.speedIndicator = shadow.querySelector("span");
     const fragment = document.createDocumentFragment();
